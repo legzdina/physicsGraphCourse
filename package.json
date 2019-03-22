@@ -1,0 +1,22 @@
+{
+  "name": "via-gp-physics",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.com/raitisbe/via-gp-physics.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://gitlab.com/raitisbe/via-gp-physics/issues"
+  },
+  "homepage": "https://gitlab.com/raitisbe/via-gp-physics#readme",
+  "dependencies": {
+    "three": "^0.101.x"
+  }
+}

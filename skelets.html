@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset=utf-8>
+    <title>Physics</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%
+        }
+    </style>
+</head>
+
+<body>
+    <script src="node_modules/three/build/three.js"></script>
+    <script src="node_modules/three/examples/js/controls/OrbitControls.js"></script>
+    <script src="node_modules/three/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="node_modules/three/examples/js/QuickHull.js"></script>
+    <script src="node_modules/three/examples/js/geometries/ConvexGeometry.js"></script>
+    <script src="https://github.com/schteppe/cannon.js/releases/download/v0.6.2/cannon.js"></script>
+    <script>
+
+        const module = {
+            camera: null, renderer: null, scene: null, controls: null, world: null, spaceship: null,
+            keysPressed: {},
+            init() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
+                this.controls = new THREE.OrbitControls(this.camera);
+                this.camera.position.y = 80;
+                this.camera.position.z = -60;
+                this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+                this.controls.enableKeys = false;
+                this.clock = new THREE.Clock();
+                this.setupRenderer();
+                this.setupEvents();
+                this.createWorld();
+                this.createLights();
+                this.animate();
+            },
+
+            setupRenderer() {
+                var renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setClearColor(0xEEEEEE);
+                renderer.shadowMap.enabled = true;
+                this.renderer = renderer;
+                document.body.appendChild(renderer.domElement);
+            },
+
+            setupEvents() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+                var keysMonitored = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'];
+                window.addEventListener('keydown', (event) => {
+                    if (keysMonitored.indexOf(event.code) > -1)
+                        this.keysPressed[event.code] = true;
+                });
+
+                window.addEventListener('keyup', (event) => {
+                    if (keysMonitored.indexOf(event.code) > -1)
+                        this.keysPressed[event.code] = false;
+                });
+            },
+
+            createGround() {
+                var geometry = new THREE.PlaneGeometry(100, 100, 32);
+                var material = new THREE.MeshStandardMaterial({ color: 0xDDDDDD, side: THREE.DoubleSide });
+                var plane = new THREE.Mesh(geometry, material);
+                plane.receiveShadow = true;
+                plane.rotation.x = Math.PI / 2; //norotets
+                plane.position.y = -0.6;
+                this.scene.add(plane);
+                //...Kods zemes fizikai
+                
+                 this.world.addBody(new CANNON.Body({
+                     position: plane.position,
+                     quaternion: plane.quaternion,
+                     type: CANNON.Body.STATIC,
+                     shape: new CANNON.Box(new CANNON.Vec3(50,50,0.1))
+                 }));
+            },
+
+            createWorld() {
+                this.world = new CANNON.World(); 
+                this.world.gravity.set(0,-9,0);
+                this.world.allowSleep = true;
+                this.createGround();
+                this.createBrickWall();
+                this.createSpaceShip();
+            },
+
+            createBrickWall() {
+               //..Kods ķieģeļu sienas izveidei
+               const brick_w = 1;
+               const brick_l = 2; //length ..privatais main
+               for(var y = 0; y<20; y++){
+                for(var x = -10; x<10; x++){
+                   var brick = new THREE.Mesh(
+                       new THREE.BoxGeometry(brick_l, brick_w, brick_w),
+                       new THREE.MeshStandardMaterial({color: 0xFF0010})
+                       );
+                       var shape = this.createBoxShape(brick);
+                    brick.position.set(x*brick_l + y % 2 * brick_l/2, y*brick_w, 40);
+                    this.createRigidBody(brick, shape, 1000);
+                    brick.rigidBody.sleep();
+                    this.scene.add(brick);
+                }
+               }
+            },
+
+            enableShadows(object) {
+                object.traverse(child => {
+                    if (child instanceof THREE.Mesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+            },
+
+            createSpaceShip() {
+                var loader = new THREE.GLTFLoader();
+                loader.load('spaceship.gltf', (gltf) => {
+                    this.spaceship = gltf.scene;
+                    this.spaceship.scale.set(0.01, 0.01, 0.01); //uzrtaisa mazaku
+                    this.scene.add(this.spaceship);
+                    this.enableShadows(this.spaceship);
+                 //   let bodyShape = this.createBoxShape(this.spaceship); //izveido fizikalo formu, bet ne fizikalo kermeni
+                    let bodyShape = this.createConvexHullShape(this.spaceship);
+                    this.spaceship.position.y = 50;
+                    this.createRigidBody(this.spaceship, bodyShape, 2000); //izveido fizikalo veidolu
+                    //this.spaceship.rigidBody.angularDamping = 0.5;
+                    this.setupShipCollisions();
+                });
+            },
+
+            setupShipCollisions() {
+                //...Noķeram, cik stiprs ir trieciena spēks kuģim
+            },
+
+            createBoxShape(threeMesh) {
+               //...Izveido kolaidera formu kastes formā pēc three ķermeņa izmēriem
+               let size = (new THREE.Box3().setFromObject(threeMesh)).getSize(); 
+               threeMesh.size = size;
+               return new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
+            },
+
+            createConvexHullShape(threeMesh) {
+                 //...Izveido convex polyhedron kolaidera formu, kas aptver three objektu
+
+                 let size = (new THREE.Box3().setFromObject(threeMesh)).getSize(); 
+               threeMesh.size = size;
+                 let hull = new THREE.QuickHull().setFromObject(threeMesh);
+               let points = hull.vertices.map(v => new CANNON.Vec3(v.point.x, v.point.y, v.point.z));
+
+                 let geometry = new THREE.ConvexGeometry(hull.vertices.map(v => v.point));
+               let mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+                   color: 0x00ff00,
+                   wireframe: true
+               }));
+               threeMesh.add(mesh);
+               faces = hull.faces.map(f => [
+                   hull.vertices.indexOf(f.getEdge(0).vertex),
+                   hull.vertices.indexOf(f.getEdge(1).vertex),
+                   hull.vertices.indexOf(f.getEdge(2).vertex)]);
+               return new CANNON.ConvexPolyhedron(points, faces);
+
+            },
+
+            createRigidBody(threeMesh, shape, mass) {
+                 //...Izveido rigid body kolaideri, pēc padotas formas un svara
+                 threeMesh.rigidBody = new CANNON.Body({
+                     mass:mass, //iapsiba, vertiba
+                     velocity: new CANNON.Vec3(0,0,0),
+                     position: new CANNON.Vec3(threeMesh.position.x,threeMesh.position.y,threeMesh.position.z ),
+                     quaternion: threeMesh.quaternion,
+                     type: CANNON.Body.DYNAMIC,
+                     shape: shape
+                 });
+                 this.world.addBody(threeMesh.rigidBody);
+            },
+
+            createLights() {
+                var light = new THREE.PointLight(0xffffff, 0.6, 140, 1);
+                light.position.y = 80;
+                light.castShadow = true;
+                light.shadow.camera.near = this.camera.near;
+                light.shadow.camera.far = this.camera.far;
+                this.scene.add(light);
+                this.scene.add(new THREE.AmbientLight(0xC0C0C0));
+            },
+
+            controlSpaceship() {
+                if (this.spaceship && this.spaceship.rigidBody) {
+                    //...Pielieto applyLocalImpulse vai applyForce, lai kustinātu kuģi, balstoties uz to, kurš taustiņs nospiests
+                    this.spaceship.rigidBody.wakeUp();
+                    if(this.keysPressed.KeyW)
+                        this.spaceship.rigidBody.applyLocalImpulse(new CANNON.Vec3(0,0,2000), new CANNON.Vec3(0,0,0));
+                        if(this.keysPressed.ArrowUp)
+                        this.rotate(this.spaceship, new CANNON.Vec3(0,-1000,0), new CANNON.Vec3(0,0,this.spaceship.size.z)); //SEIT KODU
+                    this.lookBehindSpaceship();
+                }
+            },
+
+            rotate(obj, force, point){
+                //Lai kuģis rotētu ap masas centru, jāpadod pretēji spēki radiāli simetriskos punktos
+                 
+           obj.rigidBody.applyLocalForce(force, point);
+           var negForce = new CANNON.Vec3(0,0,0);
+           force.mult(-1, negForce);
+
+           var negPoint = new CANNON.Vec3(0,0,0);
+           point.mult(-1, negPoint);
+
+           obj.rigidBody.applyLocalForce(negForce, negPoint);
+            },
+
+            lookBehindSpaceship() {
+                //...Novieto kameru aiz kuģa
+                this.camera.position.copy(
+                    this.spaceship.localToWorld(new THREE.Vector3(0,0, -this.spaceship.size.z).multiplyScalar(100))
+                    );
+                this.camera.lookAt(this.spaceship.position); //vector3 obj japadod
+            },
+
+            advancePhysicsSim() {
+                //...Simulē fiziku padodot sekundes, cik pagājušas kopš pēdējā kadra
+                var delta = this.clock.getDelta();
+                if(delta>0){
+                    this.world.step(delta);
+                }
+            },
+
+            updateObjectPositionsFromSim(){
+                //...Uzstāda THREE objektiem pozīcijas uz simulācijā iegūtajām 
+                this.scene.traverse(function(child){
+                    if(child.rigidBody){
+                        child.position.copy(child.rigidBody.position);
+                        child.quaternion.copy(child.rigidBody.quaternion);
+                    }
+                }
+
+                )
+
+            
+            },
+
+            animate() {               
+                this.controlSpaceship();
+                this.advancePhysicsSim();
+                this.updateObjectPositionsFromSim();
+                this.renderer.render(this.scene, this.camera);
+                requestAnimationFrame(() => this.animate());
+            }
+        }
+
+        module.init();
+
+    </script>
+</body>
+
+</html>
